@@ -10,11 +10,10 @@
 using namespace std;
 map <pair<int,int>,int> clientPortMap;
 map <pair<int,int>,int> port_idx;
-int serverPortSeed,clientPortSeed;
+int serverPortSeed,clientPortSeed,m,l1,alpha;
 set <int> WaitingSet;
 int random(int a, int b) {    
     int out = a + rand() % (b - a + 1);
-    cout<<out<<endl;
     return out;
 }
 class Node{
@@ -101,8 +100,8 @@ class Node{
             cout<<"Listening for  message"<<" "<<socketToListen<<"\n";
 
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
-                cout<<"Recieved Message"<<endl;                
-			    fputs(buffer, stdout);
+                cout<<"Recieved Message"<<" "<<buffer<<endl;                
+			    //fputs(buffer, stdout);
             }
 
         }
@@ -159,10 +158,16 @@ class Node{
             ssize_t sentLen = send(sockfd, "finally", strlen("finally"), 0);
             cout<<"Sending message "<< sockfd<<endl;
 
+            sleep(1);
+
+            ssize_t sentLen2 = send(sockfd, "finally2", strlen("finally2"), 0);
+            cout<<"Sending message "<< sockfd<<endl;
+
 		}
         void initClientListnerThreads(){
             for(int i=0;i<inDeg;i++)
                 {
+                    cout<<"$$$\n";
 					clientListenerThreads[i] = thread(&Node::listenForMessage,this,inDegreeVertices[i]);
                 }
         }
@@ -180,11 +185,10 @@ class Node{
 
     public:
     Node(vector<int> inDegreeVertices, vector<int> outDegreeVertices,int id){
-        cout<<id<<endl;
         this->inDegreeVertices  = inDegreeVertices;
         this->outDegreeVertices = outDegreeVertices;
-        cout<<inDegreeVertices[0]<<endl;
         inDeg = inDegreeVertices.size();
+        cout<<inDeg<<" indeg\n";
         outDeg = outDegreeVertices.size();
         clientSocketIds = new int[inDeg + 1];
         clientListenerThreads = new thread[inDeg + 1];
@@ -212,42 +216,51 @@ class Node{
 
 int main()
 {
+
+    int n;
+    ifstream input("inp-params.txt"); // take input from inp-params.txt
+    string str2;        
+    getline(input,str2);
+    n = 3;
+    
+    vector <int> inverseAdjacencyList[n+5];
+    vector <int> adjacencyList[n+5];
+    Node* nodes[n+5];
+    for(int i=1;i<=n;i++){
+        string str;   
+        getline(input, str);
+        std::istringstream line(str);
+        int flag = 0;           
+        while(getline(line, str, ' ')) {
+            int temp = stoi(str);
+            if(flag){
+                adjacencyList[i].push_back(temp);
+                inverseAdjacencyList[temp].push_back(i);
+            }
+            flag++;
+        } 
+        WaitingSet.insert(i);        
+    }
+
     srand(time(NULL));
     serverPortSeed = random(10000,11000);
     clientPortSeed = random(11000 ,12000);
-    WaitingSet.insert(1);
-    WaitingSet.insert(2);
-    WaitingSet.insert(3);
-    vector<int> v1{2,3};
-    vector<int> v2{3,2};
-    Node n1(v1,v2,1);
 
-
-    vector<int> v3{3,1};
-    vector<int> v4{1,3};
-    Node n2(v3,v4,2);
-
-    vector<int> v5{1,2};
-    vector<int> v6{2,1};
-    Node n3(v5,v6,3);
-
-   
+    for(int i=1;i<=n;i++){      
+        nodes[i] = new Node(inverseAdjacencyList[i],adjacencyList[i],i);
+    }
+    
     while(!WaitingSet.empty());
 
 
-    n1.startSenderThreads();
-    n2.startSenderThreads();
-    n3.startSenderThreads();
-
-    cout<<"Done ****"<<endl;
+    for(int i=1;i<=n;i++){
+        nodes[i]->startSenderThreads();
+    }
     sleep(5);
+    for(int i=1;i<=n;i++){
+        nodes[i]->startListenerThreads();
+    }  
 
-    
-    
-
-    n1.startListenerThreads();
-    n2.startListenerThreads();
-    n3.startListenerThreads();
-
-   
+    // don't terminate untill all the messages are done
+    sleep(10) ;
 }

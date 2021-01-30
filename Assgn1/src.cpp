@@ -10,7 +10,7 @@
 using namespace std;
 map <pair<int,int>,int> clientPortMap;
 map <pair<int,int>,int> port_idx;
-int serverPortSeed,clientPortSeed,m,l1,alpha;
+int serverPortSeed,clientPortSeed,m,l1,alpha,n;
 set <int> WaitingSet;
 int random(int a, int b) {    
     int out = a + rand() % (b - a + 1);
@@ -29,7 +29,9 @@ class Node{
 	thread* clientListenerThreads;
 	thread* messageSenderThreads;
     int* clientSocketIds ;
-    thread server;  
+    thread server; 
+    vector <int> timeVector; 
+    mutex timeVectorLock;
 
     private:
         void initServerNode(){
@@ -71,7 +73,7 @@ class Node{
            
             WaitingSet.erase(id);
             for(int clientCounter=0;clientCounter<inDeg;clientCounter++){ 
-                cout<<"Server "<<id<<": Waiting\n"<<" on port "<<servPort<<endl;
+                //cout<<"Server "<<id<<": Waiting\n"<<" on port "<<servPort<<endl;
                 clientSocketIds[clientCounter] = accept(serverSocket, (struct sockaddr *) &clntAddr, &clntAddrLen);
 				if (clientSocketIds[clientCounter] < 0) {
 					perror("accept() failed");
@@ -86,7 +88,7 @@ class Node{
                 } else {
                     puts("----\nUnable to get client IP Address");
                 }              
-                cout<<"Client Added"<<" "<<port_idx[{id,clntAddr.sin_port}]<<" "<<id<<" "<<clntAddr.sin_port<<endl;                
+                //cout<<"Client Added"<<" "<<port_idx[{id,clntAddr.sin_port}]<<" "<<id<<" "<<clntAddr.sin_port<<endl;                
 			}   
         }
 		void listenForMessage(int clientId){
@@ -95,13 +97,26 @@ class Node{
             ssize_t recvLen ;     
             int socketToListen;
             int clientPortId = clientPortMap[{id,clientId}]; // which socket to listen
-            cout<<"***"<<id<<" "<<clientId<<" "<<clientPortId<<" "<<port_idx[{id,clientPortId}]<<endl;
+            //cout<<"***"<<id<<" "<<clientId<<" "<<clientPortId<<" "<<port_idx[{id,clientPortId}]<<endl;
             while((socketToListen = port_idx[{id,clientPortId}]) == 0 );
-            cout<<"Listening for  message"<<" "<<socketToListen<<"\n";
+            //cout<<"Listening for  message"<<" "<<socketToListen<<"\n";
 
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
-                cout<<"Recieved Message"<<" "<<buffer<<endl;                
-			    //fputs(buffer, stdout);
+                string message = string(buffer);
+                cout<<message<<" "<<message.size()<<endl;
+                vector <int> sendersVector = parseString(message);
+                // for(auto k:sendersVector){
+                //     cout<<k<<" ##";
+                // }
+                // cout<<endl;
+                timeVectorLock.lock();
+                for(int i=0;i<n;i++){
+                    timeVector[i] = max(timeVector[i] , sendersVector[i]);
+                }
+                cout<<"Recieved Message Server id::" <<id<<" vc: "<<outputString()<<endl;                
+
+                timeVectorLock.unlock();
+                memset(buffer, 0, BUFSIZE);
             }
 
         }
@@ -138,7 +153,7 @@ class Node{
                 exit(-1);
             }
 			
-            cout<<id<<" to  "<<serverId<<" "<<myOwnAddr.sin_port<<" "<<serverPort<<endl;
+            //cout<<id<<" to  "<<serverId<<" "<<myOwnAddr.sin_port<<" "<<serverPort<<endl;
 
 			// Connect to server
 			if (connect(sockfd, (struct sockaddr *) &servAddr, sizeof(servAddr)) < 0) {
@@ -149,32 +164,69 @@ class Node{
 
             // while sending message from id to serverId this clients port was used
             clientPortMap[{serverId,id}] = myOwnAddr.sin_port ; 
-            cout<<serverId<<" "<<id<<" "<<myOwnAddr.sin_port<<" clientPortMap"<<endl;
+            //cout<<serverId<<" "<<id<<" "<<myOwnAddr.sin_port<<" clientPortMap"<<endl;
 			// after delay keep sending messages
 
-			// while(1){
-			// 	ssize_t sentLen = send(sockfd, "sendString", 1, 0);
-			// }
-            ssize_t sentLen = send(sockfd, "finally", strlen("finally"), 0);
-            cout<<"Sending message "<< sockfd<<endl;
-
-            sleep(1);
-
-            ssize_t sentLen2 = send(sockfd, "finally2", strlen("finally2"), 0);
-            cout<<"Sending message "<< sockfd<<endl;
-
+            for(int i=1;i<=m;i++){
+                int randomNumber = rand()%5;
+                if(randomNumber < 3){ // internal event
+                    timeVectorLock.lock();
+                    timeVector[id-1] =  timeVector[id-1] + 1 ;                  
+                    cout<<"Internal Event "<< id<<" "<<outputString()<<endl;
+                        // log event to log file
+                    timeVectorLock.unlock();
+                }else{ // message send
+                    string message = compressTimeVector();
+                    ssize_t sentLen = send(sockfd,message.c_str(), strlen(message.c_str()), 0);
+                    // log event to file
+                    cout<<"Sending message to"<< serverId<<" "<<message<<endl;
+                }
+                sleep(5);
+            }
 		}
+        string compressTimeVector(){
+            string message;
+            for(auto k:timeVector){
+                message += to_string(k);
+                message += "*";
+            }
+            return message;
+        }
+        vector<int> parseString(string str){
+            vector<int> senderTimeVector;
+            for(int i=0;i<str.size();i++){
+                string temp;
+                while(str[i] != '*'){
+                    temp+=str[i];
+                    i++;
+                }
+                senderTimeVector.push_back(stoi(temp));
+            }
+            return senderTimeVector;
+        }
+        string outputString(){
+            string message;
+            message += '[';
+            for(auto k:timeVector){
+                message+= to_string(k);
+                message+= ' ';
+            }
+            
+            message += ']';
+
+            return message;
+        }
         void initClientListnerThreads(){
             for(int i=0;i<inDeg;i++)
                 {
-                    cout<<"$$$\n";
+                    //cout<<"$$$\n";
 					clientListenerThreads[i] = thread(&Node::listenForMessage,this,inDegreeVertices[i]);
                 }
         }
 		void initMessageSenderThreads(){
 			for(int i=0;i<outDeg;i++)
 				{
-                    cout<<id<<" to "<<outDegreeVertices[i]<<" "<<serverPortSeed + outDegreeVertices[i]<<"\n";
+                    //cout<<id<<" to "<<outDegreeVertices[i]<<" "<<serverPortSeed + outDegreeVertices[i]<<"\n";
 					messageSenderThreads[i] = thread(&Node::sendMessage,this , serverPortSeed+outDegreeVertices[i] , outDegreeVertices[i]);
 				}
 		}
@@ -188,12 +240,13 @@ class Node{
         this->inDegreeVertices  = inDegreeVertices;
         this->outDegreeVertices = outDegreeVertices;
         inDeg = inDegreeVertices.size();
-        cout<<inDeg<<" indeg\n";
+        //cout<<inDeg<<" indeg\n";
         outDeg = outDegreeVertices.size();
         clientSocketIds = new int[inDeg + 1];
         clientListenerThreads = new thread[inDeg + 1];
         messageSenderThreads  = new thread[outDeg + 1]; 
-        this->id = id;     	        
+        this->id = id;  
+        timeVector.resize(n);   	        
         init();
     }
     void startListenerThreads(){
@@ -217,12 +270,10 @@ class Node{
 int main()
 {
 
-    int n;
     ifstream input("inp-params.txt"); // take input from inp-params.txt
     string str2;        
-    getline(input,str2);
-    n = 3;
-    
+    input>>n>>l1>>alpha>>m;
+    input.ignore();
     vector <int> inverseAdjacencyList[n+5];
     vector <int> adjacencyList[n+5];
     Node* nodes[n+5];
@@ -256,11 +307,11 @@ int main()
     for(int i=1;i<=n;i++){
         nodes[i]->startSenderThreads();
     }
-    sleep(5);
+    //sleep(5);
     for(int i=1;i<=n;i++){
         nodes[i]->startListenerThreads();
     }  
 
     // don't terminate untill all the messages are done
-    sleep(10) ;
+    sleep(100) ;
 }

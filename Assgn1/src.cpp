@@ -8,14 +8,29 @@
 #define BUFSIZE 1024
 #define SERVERIP "127.0.0.1"
 using namespace std;
-map <pair<int,int>,int> clientPortMap;
+map <pair<int,int>,int> clientPortMap,clientServerSocket;
 map <pair<int,int>,int> port_idx;
+map <pair<int,int>,int> sockfdMap;
+ofstream output; 
 int serverPortSeed,clientPortSeed,m,l1,alpha,n;
 set <int> WaitingSet;
 int random(int a, int b) {    
     int out = a + rand() % (b - a + 1);
     return out;
 }
+/**
+ * Helper Class for get the formatted time in HH:MM:SS 
+ * */
+class Helper {
+    public:
+    static string get_formatted_time(time_t t1) // gives formatted time in HH::MM::SS
+    {
+        struct tm* t2=localtime(&t1);
+        char buffer[20];
+        sprintf(buffer,"%d : %d : %d",t2->tm_hour,t2->tm_min,t2->tm_sec);
+        return buffer;
+    }
+};
 class Node{
 
     int id;
@@ -32,6 +47,9 @@ class Node{
     thread server; 
     vector <int> timeVector; 
     mutex timeVectorLock;
+    int* sendFreq;
+    int* recvFreq;
+    int internalFreq = 0;
 
     private:
         void initServerNode(){
@@ -88,7 +106,7 @@ class Node{
                 } else {
                     puts("----\nUnable to get client IP Address");
                 }              
-                //cout<<"Client Added"<<" "<<port_idx[{id,clntAddr.sin_port}]<<" "<<id<<" "<<clntAddr.sin_port<<endl;                
+                cout<<"Client Added"<<" "<<port_idx[{id,clntAddr.sin_port}]<<" "<<id<<" "<<clntAddr.sin_port<<endl;                
 			}   
         }
 		void listenForMessage(int clientId){
@@ -96,23 +114,23 @@ class Node{
             memset(buffer, 0, BUFSIZE);
             ssize_t recvLen ;     
             int socketToListen;
-            int clientPortId = clientPortMap[{id,clientId}]; // which socket to listen
             //cout<<"***"<<id<<" "<<clientId<<" "<<clientPortId<<" "<<port_idx[{id,clientPortId}]<<endl;
-            while((socketToListen = port_idx[{id,clientPortId}]) == 0 );
-            //cout<<"Listening for  message"<<" "<<socketToListen<<"\n";
+            while((socketToListen = clientServerSocket[{id,clientId}]) == 0 );
+            cout<<"Listening for  message"<<" "<<socketToListen<<"\n";
 
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
                 string message = string(buffer);
-                cout<<message<<" "<<message.size()<<endl;
+                //cout<<message<<" %%%% "<<socketToListen<<endl;
                 vector <int> sendersVector = parseString(message);
-                // for(auto k:sendersVector){
-                //     cout<<k<<" ##";
-                // }
-                // cout<<endl;
+               
                 timeVectorLock.lock();
                 for(int i=0;i<n;i++){
                     timeVector[i] = max(timeVector[i] , sendersVector[i]);
                 }
+                time_t RecvTime=time(NULL);
+            	string formatted_time=Helper::get_formatted_time(RecvTime);
+                string FinalString = "Process "+to_string(id) + "receives message m"+to_string(clientId)+to_string(++(recvFreq[clientId])) +"from process"+to_string(clientId)+ "at "+ formatted_time +" , vc: "+ outputString()+" incomming string "+ message +"\n";
+                output<<FinalString;
                 cout<<"Recieved Message Server id::" <<id<<" vc: "<<outputString()<<endl;                
 
                 timeVectorLock.unlock();
@@ -120,7 +138,7 @@ class Node{
             }
 
         }
-		void sendMessage(int serverPort , int serverId){
+		void setUpConnectionPort(int serverPort , int serverId){
 					//Creat a socket
 			int sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 			if (sockfd < 0) {
@@ -164,24 +182,43 @@ class Node{
 
             // while sending message from id to serverId this clients port was used
             clientPortMap[{serverId,id}] = myOwnAddr.sin_port ; 
-            //cout<<serverId<<" "<<id<<" "<<myOwnAddr.sin_port<<" clientPortMap"<<endl;
+            clientServerSocket[{serverId,id}] = sockfd;
+            cout<<id<<" "<<serverId<<" "<<sockfd<<" clientPortMap"<<endl;
 			// after delay keep sending messages
+        }
 
+        void sendMessage(){
             for(int i=1;i<=m;i++){
                 int randomNumber = rand()%5;
                 if(randomNumber < 3){ // internal event
                     timeVectorLock.lock();
                     timeVector[id-1] =  timeVector[id-1] + 1 ;                  
-                    cout<<"Internal Event "<< id<<" "<<outputString()<<endl;
-                        // log event to log file
                     timeVectorLock.unlock();
-                }else{ // message send
+                    cout<<"Internal Event "<< id<<" "<<outputString()<<endl;
                     string message = compressTimeVector();
-                    ssize_t sentLen = send(sockfd,message.c_str(), strlen(message.c_str()), 0);
+                    time_t InternalEventTime=time(NULL);
+            		string formatted_time=Helper::get_formatted_time(InternalEventTime);                    
+                    string FinalString = "Process "+to_string(id) + "executes internal event e"+to_string(id)+to_string(internalFreq++) +" at "+ formatted_time +" , vc: "+ message+"\n";
+                    output<<FinalString;
+                }else{ // message send
+                    int reciever = outDegreeVertices[rand()%outDeg] ;
+
+                    int recieverSocketPort = clientPortMap[{reciever,id}];
+                    int recieverSocket = port_idx[{reciever,recieverSocketPort}];
+                    //int recieverSocket2 = clientServerSocket[{reciever,id}];
+                    string message = compressTimeVector();
+                    ssize_t sentLen = send(recieverSocket,message.c_str(), strlen(message.c_str()), 0);
                     // log event to file
-                    cout<<"Sending message to"<< serverId<<" "<<message<<endl;
+                    //Process3 sends message m31 to process2 at 10:02, vc: [0 0 1 0]
+                    time_t SendTime=time(NULL);
+            		string formatted_time=Helper::get_formatted_time(SendTime);
+                    
+                    string FinalString = "Process "+to_string(id) + "sends message m"+to_string(id)+to_string(sendFreq[reciever]++) +"to Process"+to_string(reciever)+ "at "+ formatted_time +" , vc: "+ message+"\n";
+                    output<<FinalString;
+
+                    cout<<id<<" "<<" Sending message to "<< reciever<<" "<<message<<"--- "<<recieverSocket<<endl;
                 }
-                sleep(5);
+                sleep(3);
             }
 		}
         string compressTimeVector(){
@@ -219,19 +256,19 @@ class Node{
         void initClientListnerThreads(){
             for(int i=0;i<inDeg;i++)
                 {
-                    //cout<<"$$$\n";
 					clientListenerThreads[i] = thread(&Node::listenForMessage,this,inDegreeVertices[i]);
                 }
         }
-		void initMessageSenderThreads(){
-			for(int i=0;i<outDeg;i++)
-				{
-                    //cout<<id<<" to "<<outDegreeVertices[i]<<" "<<serverPortSeed + outDegreeVertices[i]<<"\n";
-					messageSenderThreads[i] = thread(&Node::sendMessage,this , serverPortSeed+outDegreeVertices[i] , outDegreeVertices[i]);
-				}
+		void initConnectionPorts(){
+			for(int i=0;i<outDeg;i++){
+    			messageSenderThreads[i] = thread(&Node::setUpConnectionPort,this , serverPortSeed+outDegreeVertices[i] , outDegreeVertices[i]);
+            }
+            for(int i=0;i<outDeg;i++){
+                messageSenderThreads[i].join();
+            }
 		}
         void init(){   
-            server = thread(&Node::initServerNode,this);
+            server = thread(&Node::initServerNode,this);            
         }
       
 
@@ -240,23 +277,30 @@ class Node{
         this->inDegreeVertices  = inDegreeVertices;
         this->outDegreeVertices = outDegreeVertices;
         inDeg = inDegreeVertices.size();
-        //cout<<inDeg<<" indeg\n";
         outDeg = outDegreeVertices.size();
         clientSocketIds = new int[inDeg + 1];
         clientListenerThreads = new thread[inDeg + 1];
-        messageSenderThreads  = new thread[outDeg + 1]; 
+        messageSenderThreads  = new thread[outDeg + 1];
+        sendFreq = new int[n+1];
+        recvFreq = new int[n+1];
+        memset(sendFreq,0,sizeof(sendFreq));
+        memset(recvFreq,0,sizeof(recvFreq));
         this->id = id;  
         timeVector.resize(n);   	        
         init();
     }
     void startListenerThreads(){
+        server.join();
         initClientListnerThreads();
     }
-    void startSenderThreads(){
-        initMessageSenderThreads();
+    void setUpConnectionPorts(){
+        initConnectionPorts();
+    }
+    void sendMessageThreads(){
+        sendMessage();
     }
     ~Node(){
-        server.join();
+        //server.join();
         for(int i=0;i<inDeg;i++)
             clientListenerThreads[i].join();
 
@@ -271,6 +315,7 @@ int main()
 {
 
     ifstream input("inp-params.txt"); // take input from inp-params.txt
+    output.open("Log.txt");
     string str2;        
     input>>n>>l1>>alpha>>m;
     input.ignore();
@@ -303,15 +348,16 @@ int main()
     
     while(!WaitingSet.empty());
 
-
     for(int i=1;i<=n;i++){
-        nodes[i]->startSenderThreads();
+        nodes[i]->setUpConnectionPorts();
     }
-    //sleep(5);
+
     for(int i=1;i<=n;i++){
         nodes[i]->startListenerThreads();
     }  
-
+    for(int i=1;i<=n;i++){
+        nodes[i]->sendMessageThreads();
+    }
     // don't terminate untill all the messages are done
-    sleep(100) ;
+    //sleep(100) ;
 }

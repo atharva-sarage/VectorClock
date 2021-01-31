@@ -1,0 +1,20 @@
+Process 1executes internal event e10 at 23 : 5 : 18 , vc: 1*0*0*
+Process 1sends message m10to Process2at 23 : 5 : 21 , vc: 1*0*0*
+Process 2receives message m11from process1at 23 : 5 : 21 , vc: [1 0 0 ] incomming string 1*0*0*
+Process 1executes internal event e11 at 23 : 5 : 24 , vc: 2*0*0*
+Process 1executes internal event e12 at 23 : 5 : 27 , vc: 3*0*0*
+Process 1executes internal event e13 at 23 : 5 : 30 , vc: 4*0*0*
+Process 2sends message m20to Process1at 23 : 5 : 33 , vc: 1*0*0*
+Process 1receives message m21from process2at 23 : 5 : 33 , vc: [4 0 0 ] incomming string 1*0*0*
+Process 2sends message m20to Process3at 23 : 5 : 36 , vc: 1*0*0*
+Process 3receives message m21from process2at 23 : 5 : 36 , vc: [1 0 0 ] incomming string 1*0*0*
+Process 2executes internal event e20 at 23 : 5 : 39 , vc: 1*1*0*
+Process 2sends message m21to Process1at 23 : 5 : 42 , vc: 1*1*0*
+Process 1receives message m22from process2at 23 : 5 : 42 , vc: [4 1 0 ] incomming string 1*1*0*
+Process 2executes internal event e21 at 23 : 5 : 45 , vc: 1*2*0*
+Process 3executes internal event e30 at 23 : 5 : 48 , vc: 1*0*1*
+Process 3executes internal event e31 at 23 : 5 : 51 , vc: 1*0*2*
+Process 3executes internal event e32 at 23 : 5 : 54 , vc: 1*0*3*
+Process 3executes internal event e33 at 23 : 5 : 57 , vc: 1*0*4*
+Process 3sends message m30to Process1at 23 : 6 : 0 , vc: 1*0*4*
+Process 1receives message m31from process3at 23 : 6 : 0 , vc: [4 1 4 ] incomming string 1*0*4*

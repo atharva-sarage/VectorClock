@@ -114,8 +114,8 @@ class Node{
             memset(buffer, 0, BUFSIZE);
             ssize_t recvLen ;     
             int socketToListen;
-            //cout<<"***"<<id<<" "<<clientId<<" "<<clientPortId<<" "<<port_idx[{id,clientPortId}]<<endl;
-            while((socketToListen = clientServerSocket[{id,clientId}]) == 0 );
+            int clientPortId = clientPortMap[{id,clientId}]; // which socket to listen
+            while((socketToListen = port_idx[{id,clientPortId}]) == 0 );
             cout<<"Listening for  message"<<" "<<socketToListen<<"\n";
 
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
@@ -202,10 +202,7 @@ class Node{
                     output<<FinalString;
                 }else{ // message send
                     int reciever = outDegreeVertices[rand()%outDeg] ;
-
-                    int recieverSocketPort = clientPortMap[{reciever,id}];
-                    int recieverSocket = port_idx[{reciever,recieverSocketPort}];
-                    //int recieverSocket2 = clientServerSocket[{reciever,id}];
+                    int recieverSocket = clientServerSocket[{reciever,id}];
                     string message = compressTimeVector();
                     ssize_t sentLen = send(recieverSocket,message.c_str(), strlen(message.c_str()), 0);
                     // log event to file

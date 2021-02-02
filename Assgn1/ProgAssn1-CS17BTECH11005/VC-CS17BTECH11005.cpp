@@ -13,7 +13,7 @@ map <pair<int,int>,int> port_idx;
 map <pair<int,int>,int> sockfdMap;
 std::default_random_engine eng;
 ofstream output; 
-int serverPortSeed,clientPortSeed,m,l1,alpha,n;
+int serverPortSeed,clientPortSeed,m,l1,n;
 double alpha;
 set <int> WaitingSet;
 vector <int> serverSocketfds;
@@ -384,8 +384,8 @@ int main()
     // Create random serverPortSeed and ClientPortSeed 
     // Using this as base seed client and server threads will compute their port numbers
     srand(time(NULL));
-    serverPortSeed = Helper::getRandomNumber(10000,11000);
-    clientPortSeed = Helper::getRandomNumber(11000 ,12000);
+    serverPortSeed = Helper::getRandomNumber(10000,20000);
+    clientPortSeed = Helper::getRandomNumber(20000,30000);
     int totalIndeg = 0;
     for(int i=1;i<=n;i++){      
         nodes[i] = new Node(inverseAdjacencyList[i],adjacencyList[i],i); // create a node 
@@ -396,7 +396,6 @@ int main()
     for(int i=1;i<=n;i++){
         nodes[i]->setUpConnectionPorts();
     }
-
     for(int i=1;i<=n;i++){
         nodes[i]->startListenerThreads();
     }  

@@ -1,0 +1,10 @@
+g++ lock.cpp -pthread
+mkdir FinalResult5
+
+for (( c = 2; c<=64 ; c=c*2))
+do
+    echo "$c 10 1 2" > inp-params.txt
+    ./a.out < inp-params.txt > "./FinalResult5/$c.txt"
+    echo "$c done"
+done
+

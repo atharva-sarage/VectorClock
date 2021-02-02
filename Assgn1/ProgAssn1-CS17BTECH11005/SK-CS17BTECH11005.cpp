@@ -13,11 +13,12 @@ map <pair<int,int>,int> port_idx;
 map <pair<int,int>,int> sockfdMap;
 std::default_random_engine eng;
 ofstream output; 
-int serverPortSeed,clientPortSeed,m,l1,alpha,n;
+int serverPortSeed,clientPortSeed,m,l1,n;
 double alpha;
 set <int> WaitingSet;
+int messageCounter=0;
+mutex messageCounterLock,waitingSetLock;
 vector <int> serverSocketfds;
-mutex waitingSetLock;
 /**
  * Helper Class for get the formatted time in HH:MM:SS 
  * */
@@ -56,7 +57,8 @@ class Node{
     int* sendFreq;
     int* recvFreq;
     int internalFreq = 0;
-    mutex setLock;
+    int* lastSent;
+    int* lastUpdate;
 
     private:
         void initServerNode(){
@@ -94,8 +96,7 @@ class Node{
 			socklen_t clntAddrLen = sizeof(clntAddr);
 
 
-            // not necessarily connect in usual order so do propper maping of port to clientSocketid
-           
+            
             waitingSetLock.lock();
             // Add this id to the waiting set as the server is now in listening state
             WaitingSet.erase(id); 
@@ -111,7 +112,7 @@ class Node{
 					perror("accept() failed");
 					exit(-1);
 				}
-
+                
                 // now we need to which client connected 
                 // port_idx map will store the socket file descriptor for the connection between
                 // server id and clinet with port clntAddr.sin_port
@@ -119,6 +120,8 @@ class Node{
                 // socket where the server can listen
                 char clntIpAddr[INET_ADDRSTRLEN];
                 if (inet_ntop(AF_INET, &clntAddr.sin_addr.s_addr,clntIpAddr, sizeof(clntIpAddr)) != NULL) {
+                    //printf("----\nHandling client %s %d for %d\n",
+                    //clntIpAddr, clntAddr.sin_port,id);
                     port_idx[{id,clntAddr.sin_port}] = clientSocketIds[clientCounter];
                 } else {
                     puts("----\nUnable to get client IP Address");
@@ -133,39 +136,54 @@ class Node{
             int socketToListen;
             // clientPortMap will give the client's port for the connection between 
             // server id and client with id clientId
-            int clientPortId = clientPortMap[{id,clientId}]; // which socket to listen
+            int clientPortId = clientPortMap[{id,clientId}]; 
             // We need clientPort as it is unique for every connection with different server 
             
             // port_idx will give the socket file descriptor for connection between server id
             // and client with clientport clientPortId
 
             while((socketToListen = port_idx[{id,clientPortId}]) == 0 );
+            serverSocketfds.push_back(socketToListen);
 
             while( recvLen =  recv(socketToListen, buffer, BUFSIZE - 1, 0) > 0){
                 string message = string(buffer);
-                vector <vector <int> > sendersVector = parseString(message);
+                vector <vector <pair<int,int>> > sendersVector = parseString(message);
                 // As multive send calls can be handled by single recv we need to handle for 
                 // multiple send calls. 
                 // sendersVector is a vector of vector of pairs 
                 // where pairs are the updated index which the server needs to update
                 for(auto senderVector : sendersVector){
+
+                    timeVectorLock.lock(); // use mutex lock as timeVector is shared between listen and send 
+                    timeVector[id-1] =  timeVector[id-1] + 1 ;// increment own's vector time
+                    lastUpdate[id] = timeVector[id-1];
                    
-                    timeVectorLock.lock();
-                    for(int i=0;i<n;i++){
-                        timeVector[i] = max(timeVector[i] , senderVector[i]);
+                   // find all the entries which will be updated by the current set of pairs recieved
+                    vector<int>updatedEntries; 
+                    for(auto k1:senderVector){
+                        if(k1.second > timeVector[k1.first - 1]){
+                            updatedEntries.push_back(k1.first);
+                            timeVector[k1.first -1 ] = k1.second;
+                        }
                     }
-                    time_t RecvTime=time(NULL);
-                    string formatted_time=Helper::get_formatted_time(RecvTime);
-                    string FinalString = "process"+to_string(id) + " receives message m"+to_string(clientId)+to_string(++(recvFreq[clientId])) +" from process"+to_string(clientId)+ " at "+ formatted_time +" , vc: "+ outputTimeVectorString()+"\n";
-                    output<<FinalString;
+                    // update the lastUpdate array
+                    for(auto entry:updatedEntries){
+                        lastUpdate[entry] = timeVector[id-1];
+                    }
                     timeVectorLock.unlock();
-                    memset(buffer, 0, BUFSIZE);
+
+                    time_t RecvTime=time(NULL); // build string to log to file
+                    string formatted_time=Helper::get_formatted_time(RecvTime);
+                    string FinalString = "process"+to_string(id) + " receives message m"+to_string(clientId)+to_string(recvFreq[clientId]) +" from process"+to_string(clientId)+ " at "+ formatted_time +" , vc: "+ outputTimeVectorString()+"\n"; //+" incomming string "+ message +"\n";
+                    recvFreq[clientId]++;
+                    output<<FinalString;
+                    memset(buffer, 0, BUFSIZE); // reset buffer
                 }
             }
 
         }
 		void setUpConnectionPort(int serverPort , int serverId){
-					//Creat a socket
+			//Creat a socket
 			int sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 			if (sockfd < 0) {
 				perror("socket() failed");
@@ -173,8 +191,9 @@ class Node{
 			}	
 
 			
-			// Set the server address
+			// Set the server address servAddr will store details of server
 			struct sockaddr_in servAddr , myOwnAddr;
+
 			memset(&servAddr, 0, sizeof(servAddr));           
 			servAddr.sin_family = AF_INET;
 			int err = inet_pton(AF_INET, SERVERIP, &servAddr.sin_addr.s_addr);
@@ -193,14 +212,13 @@ class Node{
 				perror("inet_pton() failed");
 				exit(-1);
 			}
-
             // clients port clientPortSeed+id+100*serverId to uniquely define each port
-			myOwnAddr.sin_port = htons(clientPortSeed+id+10*serverId);
+			myOwnAddr.sin_port = htons(clientPortSeed+id+100*serverId);
             if (bind(sockfd, (struct sockaddr *) &myOwnAddr, sizeof(myOwnAddr)) < 0) {
                 perror("bind() failed");
                 exit(-1);
             }
-			
+
 			// Connect to server
 			if (connect(sockfd, (struct sockaddr *) &servAddr, sizeof(servAddr)) < 0) {
 				perror("connect() failed");
@@ -219,51 +237,98 @@ class Node{
         void sendMessage(){
             std::exponential_distribution<double>exponential(1.0/l1); // to generate sleep times having exponential distribution
             for(int i=1;i<=m;i++){
-                timeVectorLock.lock();
-                timeVector[id-1] =  timeVector[id-1] + 1 ;                  
-                timeVectorLock.unlock();
                 int randomNumber = Helper::getRandomNumber(1,5);
+                timeVectorLock.lock(); // update its own timeVector
+                timeVector[id-1] =  timeVector[id-1] + 1 ;    
+                lastUpdate[id] = timeVector[id-1];
+                timeVectorLock.unlock();
+               
                 // Since alpha is 1.5 [1-3] will correspond to internal event and 
                 // [4,5] will correspond to send event
-                if(randomNumber < 3){ // internal event
-                   
-                    string message = outputTimeVectorString();
+                if(randomNumber < 3){ // internal event                  
                     time_t InternalEventTime=time(NULL);
             		string formatted_time=Helper::get_formatted_time(InternalEventTime);                    
-                    string FinalString = "process"+to_string(id) + " executes internal event e"+to_string(id)+to_string(++internalFreq) +" at "+ formatted_time +" , vc: "+ message+"\n";
+                    string FinalString = "process"+to_string(id) + " executes internal event e"+to_string(id)+to_string(++internalFreq) +" at "+ formatted_time +" , vc: "+ outputTimeVectorString()+"\n";
                     output<<FinalString;
-                }else{ // message send                    
+                }else{ // message send
+                    // select a random outdegree vertex
                     int randomOutDegreeIndex = Helper::getRandomNumber(0,outDeg-1);
                     int reciever = outDegreeVertices[randomOutDegreeIndex] ;
                     int recieverSocket = clientServerSocket[{reciever,id}];
-                    string message = outputTimeVectorString();
+                    // generate all the pairs which were updated since the last send 
+                    string message = getUpdatedMessagePairs(reciever);               
+                    // send the message    
                     ssize_t sentLen = send(recieverSocket,message.c_str(), strlen(message.c_str()), 0);
+
+                    // Logging to file
                     time_t SendTime=time(NULL);
-            		string formatted_time=Helper::get_formatted_time(SendTime);
-                    
-                    string FinalString = "process"+to_string(id) + " sends message m"+to_string(id)+to_string(++sendFreq[reciever]) +" to process"+to_string(reciever)+ " at "+ formatted_time +" , vc: "+ message+"\n";
+            		string formatted_time=Helper::get_formatted_time(SendTime); 
+            
+                    string FinalString = "process"+to_string(id) + " sends message m"+to_string(id)+to_string(sendFreq[reciever]) +" to process"+to_string(reciever)+ " at "+ formatted_time +" , vc: "+ outputTimeVectorString()+"\n";
+                    sendFreq[reciever]++;
                     output<<FinalString;
+
+                    // update Last Sent Array
+                    timeVectorLock.lock();
+                    lastSent[reciever] = timeVector[id-1];
+                    timeVectorLock.unlock();
                 }           
                 usleep(exponential(eng)*1000); // sleep for random time
             }
+            // close sockets
+            for(auto k:outDegreeVertices){
+                int recieverSocket = clientServerSocket[{k,id}];
+                close(recieverSocket);
+            }
 		}
-        // parses the string to returns vector of vector
-        // as multilple send can be handled by single recv
-        vector< vector<int> > parseString(string str){
-            vector< vector<int> > senderTimeVector;
+
+        // returns the pairs of x,vt[x] which are to be updated
+        string getUpdatedMessagePairs(int clientId){
+            string message = "[";
+
+            for(int i=1;i<=n;i++){
+                // if satisfies the condition add this pair
+                if(lastSent[clientId] < lastUpdate[i]){ 
+                    messageCounterLock.lock();
+                    messageCounter++;
+                    messageCounterLock.unlock();
+                    message +='(';
+                    message += to_string(i);
+                    message += ',';
+                    message += to_string(timeVector[i-1]);
+                    message += ')';
+                }
+            }
+            message+=']';
+            return message;
+        }
+
+        // Used by listener thread to parse the incomming string
+        // and get the x,vt[x] pairs using which vector time of
+        // the listner process will be updated
+        vector< vector<pair<int,int>> > parseString(string str){
+            vector< vector<pair<int,int>> > senderTimeVector;
             for(int i=0;i<str.size();i++){
                 if(str[i]=='['){
                     i++;
-                    string temp;
-                    vector <int> tempVec;
+                    string temp,temp2;
+                    vector <pair<int,int>> tempVec;
                     while(str[i] != ']'){
-                        while(str[i] != ' ' && str[i]!= ']'){
+                        if(str[i] == '(') i++;
+                        while(str[i] != ','){
                             temp+=str[i];
                             i++;
                         }
-                        if(str[i]==' ') i++;
-                        tempVec.push_back(stoi(temp));
+
+                        if(str[i] == ',')i++;
+                        while(str[i] != ')'){
+                            temp2+=str[i];
+                            i++;
+                        }
+                        if(str[i]==')')i++;
+                        tempVec.push_back({stoi(temp),stoi(temp2)});
                         temp.clear();
+                        temp2.clear();
                     }
                     senderTimeVector.push_back(tempVec);
                 }               
@@ -271,7 +336,7 @@ class Node{
             return senderTimeVector;
         }
 
-         // outputs the time vector as a string
+        // outputs the time vector as a string
         string outputTimeVectorString(){
             string message;
             message += '[';
@@ -284,7 +349,7 @@ class Node{
 
             return message;
         }
-
+              
         // creates listner thread total no is given by indegree of this node in the graph
         void initClientListnerThreads(){
             for(int i=0;i<inDeg;i++)
@@ -325,8 +390,12 @@ class Node{
         // will keep track of how many times message has been recieved from process i
         recvFreq = new int[n+1];
 
+        lastSent = new int[n+1]; // lastSEnt and lastUPdate arrays
+        lastUpdate = new int[n+1];
+
         for(int i=1;i<=n;i++){
-            sendFreq[i] = recvFreq[i] = 0;
+            sendFreq[i] = recvFreq[i] = 1;
+            lastSent[i] = lastUpdate[i] = 0;
         }
         this->id = id;  
         timeVector.resize(n);   	        
@@ -342,7 +411,8 @@ class Node{
     void sendMessageThreads(){ // start message sender thread
         sendMessage();
     }
-    ~Node(){
+    ~Node(){ // Destructor
+        
         for(int i=0;i<inDeg;i++)
             clientListenerThreads[i].join();
 
@@ -384,8 +454,8 @@ int main()
     // Create random serverPortSeed and ClientPortSeed 
     // Using this as base seed client and server threads will compute their port numbers
     srand(time(NULL));
-    serverPortSeed = Helper::getRandomNumber(10000,11000);
-    clientPortSeed = Helper::getRandomNumber(11000 ,12000);
+    serverPortSeed = Helper::getRandomNumber(10000,20000);
+    clientPortSeed = Helper::getRandomNumber(20000 ,30000);
     int totalIndeg = 0;
     for(int i=1;i<=n;i++){      
         nodes[i] = new Node(inverseAdjacencyList[i],adjacencyList[i],i); // create a node 
@@ -396,15 +466,17 @@ int main()
     for(int i=1;i<=n;i++){
         nodes[i]->setUpConnectionPorts();
     }
-
     for(int i=1;i<=n;i++){
         nodes[i]->startListenerThreads();
     }  
+    sleep(1);
     for(int i=1;i<=n;i++){
         nodes[i]->sendMessageThreads();
     }
 
+
+    cout<<n<<" "<<(messageCounter*1.0/ (n* m * 1.0))<<endl;
     for(auto k:serverSocketfds) // close server sockets , client sockets are already closed
         close(k);
-       
+    
 }
